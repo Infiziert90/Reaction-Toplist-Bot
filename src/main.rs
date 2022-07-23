@@ -6,10 +6,10 @@ use rayon::prelude::*;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Utc};
 use serenity::{
     async_trait,
-    model::{gateway::Ready},
+    model::gateway::Ready,
     model::channel::{Message, ReactionType::Custom},
     prelude::*,
-    model::id::{ChannelId, EmojiId}
+    model::id::ChannelId,
 };
 use serenity::framework::standard::{
     StandardFramework,
@@ -18,12 +18,12 @@ use serenity::framework::standard::{
     Args,
     macros::{
         command,
-        group
-    }
+        group,
+    },
 };
 use serenity::model::channel::{ChannelType, GuildChannel};
 use serde::{Deserialize, Serialize};
-use linkify::{LinkFinder};
+use linkify::LinkFinder;
 
 
 const CHANNEL: u64 = 222037538238365696;
@@ -50,17 +50,6 @@ impl Counter {
             custom_name: String::new()
         }
     }
-
-    fn new_custom(ml: String, b: u64, a: String, name: String) -> Counter {
-        Counter{
-            link: String::new(),
-            msg_link: ml,
-            based: b,
-            cringe: 0,
-            author: a,
-            custom_name: name,
-        }
-    }
 }
 
 impl fmt::Display for Counter {
@@ -80,7 +69,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(ranking_based, ranking_cringe, ranking_custom)]
+#[commands(ranking_based, ranking_cringe)]
 struct General;
 
 fn args_into_date(mut args: Args) -> std::result::Result<(NaiveDateTime, String), CommandError> {
@@ -93,69 +82,6 @@ fn args_into_date(mut args: Args) -> std::result::Result<(NaiveDateTime, String)
     };
 
     Ok((NaiveDate::from_ymd(year, month, day).and_hms(0, 0, 0), name))
-}
-
-async fn custom_scan_channel(ctx: &Context, after: i64, custom_id: u64, name: String) -> Vec<Counter> {
-    let channel_id: ChannelId = ChannelId(CHANNEL);
-    let mut last_id = channel_id.to_channel(&ctx.http)
-        .await
-        .unwrap()
-        .guild()
-        .unwrap()
-        .last_message_id
-        .unwrap();
-
-    let mut counted: Vec<Counter> = Vec::new();
-    match get_custom_count(channel_id.message(&ctx.http, last_id).await.unwrap(), custom_id, name.clone()) {
-        Some(t) => counted.push(t),
-        None => {}
-    };
-
-    loop {
-        let msg = channel_id
-            .messages(&ctx.http, |retriever| retriever
-                .before(last_id)
-                .limit(100)
-            )
-            .await
-            .unwrap();
-
-        let last = msg.last().unwrap().clone();
-        last_id = last.id;
-
-
-        let mut counts: Vec<Counter> = msg.into_par_iter()
-            .filter(|m| m.timestamp.timestamp() > after )
-            .filter_map(|m| {
-                return get_custom_count(m, custom_id, name.clone())
-            })
-            .collect();
-
-        counted.append(&mut counts);
-        if last.timestamp.timestamp() < after {
-            break
-        }
-    }
-
-    counted
-}
-
-fn get_custom_count(message: Message, custom_id: u64, name: String) -> Option<Counter> {
-    let (based, cringe) = message.reactions
-        .iter()
-        .fold((0, 0), |(based, cringe), r| {
-            match &r.reaction_type {
-                Custom{id, ..} if id == &EmojiId(custom_id) => (r.count, r.count),
-                _ => (based, cringe),
-            }
-        });
-
-    if based == 0 || cringe == 0 {
-        return None;
-    }
-
-    let ml = message.link();
-    Some(Counter::new_custom(ml, based, message.author.name, name))
 }
 
 async fn scan_channel(ctx: &Context, after: i64) -> Vec<Counter> {
@@ -283,7 +209,7 @@ async fn generate_thread_messages(ctx: &Context, counts: Vec<Counter>, name: Str
 }
 
 async fn create_thread(ctx: &Context, name: String) -> GuildChannel {
-    let channel_id: ChannelId = ChannelId(CHANNEL);
+    let channel_id = ChannelId(CHANNEL);
     let channel = channel_id.to_channel(&ctx.http)
         .await
         .unwrap()
@@ -324,31 +250,6 @@ async fn ranking_cringe(ctx: &Context, msg: &Message, args: Args) -> CommandResu
     typing.stop();
 
     generate_thread_messages(&ctx, counts, generate_thread_name(name, "Cringe")).await;
-    Ok(())
-}
-
-#[command]
-async fn ranking_custom(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let year = args.single::<i32>()?;
-    let month = args.single::<u32>()?;
-    let day = args.single::<u32>()?;
-    let custom_id = args.single::<u64>()?;
-    let name = args.single::<String>()?;
-
-
-    let date = NaiveDate::from_ymd(year, month, day).and_hms(0, 0, 0);
-    let after = date.timestamp();
-
-    println!("Start counting custom memes");
-    let t = msg.channel_id.start_typing(&ctx.http).unwrap();
-
-    // let mut counts = custom_scan_channel(&ctx, after, custom_id, name.clone()).await;
-    // counts.sort_by(|a, b| b.based.cmp(&a.based));
-    //
-    // let title = format!("The Ultimate {} Ranking!!!", name);
-    // send_embed(&ctx, &msg, &title, date, counts).await;
-    t.stop();
-
     Ok(())
 }
 
