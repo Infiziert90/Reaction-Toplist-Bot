@@ -1,0 +1,20 @@
+channel_id = 292651939555049472
+
+[[toplist]]
+max = 15 # this is the default
+emoji.name = "yes"
+emoji.id = 1000377617683333210
+
+[[toplist]]
+emoji.name = "no"
+emoji.id = 688706987290394635
+
+[[toplist]]
+emoji.string = "🙃"
+
+[other]
+enabled = true
+max = 15 # also the default
+ignore = [
+    { string = "♻\ufe0f" }, # Sometimes discord has this extra char
+]

@@ -1,274 +1,216 @@
-extern crate serde_json;
+#![feature(map_first_last, slice_concat_trait)]
 
-use std::fmt;
+use std::{collections::BTreeSet, sync::Arc};
 use std::env;
-use rayon::prelude::*;
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Utc};
+use std::error::Error;
+use std::path::Path;
 use serenity::{
     async_trait,
-    model::gateway::Ready,
-    model::channel::{Message, ReactionType::Custom},
-    prelude::*,
-    model::id::ChannelId,
-};
-use serenity::framework::standard::{
-    StandardFramework,
-    CommandResult,
-    CommandError,
-    Args,
-    macros::{
-        command,
-        group,
+    client::bridge::gateway::ShardManager,
+    http::Typing,
+    model::{
+        channel::{ChannelType, GuildChannel, ReactionType},
+        gateway::Ready,
+        id::MessageId,
     },
+    prelude::{Client, Context, SerenityError, Mutex, TypeMapKey, EventHandler},
 };
-use serenity::model::channel::{ChannelType, GuildChannel};
-use serde::{Deserialize, Serialize};
-use linkify::LinkFinder;
 
+mod config;
+mod toplist;
+mod time_utils;
 
-const CHANNEL: u64 = 222037538238365696;
-const TEST: u64 = 411952567795449867;
-
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-struct Counter {
-    link: String,
-    msg_link: String,
-    based: u64,
-    cringe: u64,
-    author: String,
-    custom_name: String
-}
-
-impl Counter {
-    fn new(l: String, ml: String, b: u64, c: u64, a: String) -> Counter {
-        Counter{
-            link: l,
-            msg_link: ml,
-            based: b,
-            cringe: c,
-            author: a,
-            custom_name: String::new()
-        }
-    }
-}
-
-impl fmt::Display for Counter {
-    // This trait requires `fmt` with this exact signature.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}    Author: {}", self.custom_name, self.based, self.author)
-    }
-}
-
-struct Handler;
-
-#[async_trait]
-impl EventHandler for Handler {
-    async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
-    }
-}
-
-#[group]
-#[commands(ranking_based, ranking_cringe)]
-struct General;
-
-fn args_into_date(mut args: Args) -> std::result::Result<(NaiveDateTime, String), CommandError> {
-    let year = args.single::<i32>()?;
-    let month = args.single::<u32>()?;
-    let day = args.single::<u32>()?;
-    let name = match args.single::<String>() {
-        Ok(t) => t,
-        Err(_) => String::new()
-    };
-
-    Ok((NaiveDate::from_ymd(year, month, day).and_hms(0, 0, 0), name))
-}
-
-async fn scan_channel(ctx: &Context, after: i64) -> Vec<Counter> {
-    let channel_id: ChannelId = ChannelId(CHANNEL);
-    let mut last_id = channel_id.to_channel(&ctx.http)
-        .await
-        .unwrap()
-        .guild()
-        .unwrap()
-        .last_message_id
-        .unwrap();
-
-    let mut counted: Vec<Counter> = Vec::new();
-    match get_count(channel_id.message(&ctx.http, last_id).await.unwrap()) {
-        Some(t) => counted.push(t),
-        None => {}
-    };
-
-    loop {
-        let msg = channel_id
-            .messages(&ctx.http, |retriever| retriever
-                .before(last_id)
-                .limit(100)
-            )
-            .await
-            .unwrap();
-
-        let last = msg.last().unwrap().clone();
-        last_id = last.id;
-
-
-        let mut counts: Vec<Counter> = msg.into_par_iter()
-            .filter(|m| m.timestamp.timestamp() > after )
-            .filter_map(|m| {
-                return get_count(m)
-            })
-            .collect();
-
-        counted.append(&mut counts);
-        if last.timestamp.timestamp() < after {
-            break
-        }
-    }
-
-    counted
-}
-
-fn get_count(message: Message) -> Option<Counter> {
-    let (based, cringe) = message.reactions
-        .iter()
-        .fold((0, 0), |(based, cringe), r| {
-            if !(&r.me) {return (based, cringe)};
-            match &r.reaction_type {
-                Custom{name, ..} if name == &Some("based".to_string()) => (r.count, cringe),
-                Custom{name, ..} if name == &Some("cringe".to_string()) => (based, r.count),
-                _ => (based, cringe),
-            }
-        });
-
-    if based == 0 || cringe == 0 {
-        return None;
-    }
-
-    let l;
-    let ml = message.link();
-    let finder = LinkFinder::new();
-
-    match message.attachments.first() {
-        Some(t) => {
-            l = t.url.clone();
-        },
-        None => {
-            let links: Vec<_> = finder.links(&message.content).collect();
-            let link = match links.first() {
-                Some(t) => t,
-                None => {
-                    println!("{}", message.content);
-                    return None
-                }
-            };
-
-            l = link.as_str().to_string();
-        }
-    };
-
-    Some(Counter::new(l, ml, based, cringe, message.author.name))
-}
-
-fn generate_thread_name(name: String, t: &str) -> String {
-    return if name.is_empty() {
-        let isoweek = &Utc::now().naive_utc().iso_week();
-        format!("{} WN {} {}", t, isoweek.week(), isoweek.year())
-    } else {
-        name
-    }
-}
-
-async fn generate_thread_messages(ctx: &Context, counts: Vec<Counter>, name: String) {
-    let thread = create_thread(ctx, name).await;
-
-    println!("Start populating thread.");
-
-    for (idx, item) in counts.iter().enumerate() {
-        if idx > 14 {break;}
-        thread.send_message(&ctx.http, |msg| {
-            msg.content(format!("{}: {}", idx+1, &item.author))
-        }).await.expect("Unable to send message.");
-
-        thread.send_message(&ctx.http, |msg| {
-            msg.content(format!("{}", &item.link))
-        }).await.expect("Unable to send message.");
-
-        thread.send_message(&ctx.http, |msg| {
-            msg.add_embed(|embed| {
-                embed.title("  ");
-                embed.description(
-                    format!("{} <:based:748564944449962017> {} <:cringe:748564944819060856>    [link]({})",
-                            &item.based, &item.cringe, &item.msg_link)
-                )
-            })
-        }).await.expect("Unable to send message.");
-    }
-
-    println!("Done populating thread.");
-}
-
-async fn create_thread(ctx: &Context, name: String) -> GuildChannel {
-    let channel_id = ChannelId(CHANNEL);
-    let channel = channel_id.to_channel(&ctx.http)
-        .await
-        .unwrap()
-        .guild()
-        .unwrap();
-    channel.create_private_thread(&ctx.http, |thread| {
-        thread.name(name);
-        thread.auto_archive_duration(10080);
-        thread.kind(ChannelType::PublicThread)
-    }).await.expect("No permissions to create thread!")
-}
-
-#[command]
-async fn ranking_based(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let (date, name) = args_into_date(args).expect("Wrong arguments");
-    let after = date.timestamp();
-
-    println!("Start counting based memes");
-    let typing = msg.channel_id.start_typing(&ctx.http).unwrap();
-    let mut counts = scan_channel(&ctx, after).await;
-    counts.sort_by(|a, b| b.based.cmp(&a.based));
-    typing.stop();
-
-    //generate_html("Based", counts);
-    generate_thread_messages(&ctx, counts, generate_thread_name(name, "Based")).await;
-    Ok(())
-}
-
-#[command]
-async fn ranking_cringe(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let (date, name) = args_into_date(args).expect("Wrong arguments");
-    let after = date.timestamp();
-
-    println!("Start counting cringe memes");
-    let typing = msg.channel_id.start_typing(&ctx.http).unwrap();
-    let mut counts = scan_channel(&ctx, after).await;
-    counts.sort_by(|a, b| b.cringe.cmp(&a.cringe));
-    typing.stop();
-
-    generate_thread_messages(&ctx, counts, generate_thread_name(name, "Cringe")).await;
-    Ok(())
-}
+use config::{Config, Emoji};
+use toplist::{Toplist, MsgWrap};
 
 #[tokio::main]
-async fn main() {
-    let framework = StandardFramework::new()
-        .configure(|c| c.prefix(">>"))
-        .group(&GENERAL_GROUP);
+async fn main() -> Result<(), Box<dyn Error>> {
+    let config = Config::from_path(Path::new("./config.toml"))?;
+
+    // Parse week from command line argument
+    let week_param = std::env::args().nth(1);
+    let week_param_str = week_param.as_ref().map(|s| s.as_str());
+    let options = Options { calendar_week: time_utils::parse_iso_week(week_param_str)? };
+
+    eprintln!("Config: {:?}", config);
+    eprintln!("Options: {:?}", options);
 
     // Login with a bot token from the environment
-    let token = env::var("DISCORD_TOKEN").expect("token");
+    let token = env::var("DISCORD_TOKEN").expect("token missing");
     let mut client = Client::builder(token)
-        .event_handler(Handler)
-        .framework(framework)
+        .event_handler(ReactionCounter { config, options })
         .await
         .expect("Error creating client");
 
-    // start listening for events by starting a single shard
+    {
+        // Insert shard manager so we can shut it down from within an event handler
+        let mut data = client.data.write().await;
+        data.insert::<ShardManagerContainer>(client.shard_manager.clone());
+    }
+
     if let Err(why) = client.start().await {
-        println!("An error occurred while running the client: {:?}", why);
+        eprintln!("An error occurred while running the client: {:?}", why);
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Options {
+    calendar_week: chrono::IsoWeek,
+}
+
+/// Wrapping to be able to shutdown the client from within an event handler.
+/// Taken from:
+/// https://github.com/serenity-rs/serenity/blob/5363f2a8a362dc9bc210c9a87da985d43ab7faca/examples/e06_sample_bot_structure/src/main.rs
+pub struct ShardManagerContainer;
+
+impl TypeMapKey for ShardManagerContainer {
+    type Value = Arc<Mutex<ShardManager>>;
+}
+
+struct ReactionCounter {
+    /// file-based configuration
+    config: Config,
+    /// command-line arguments
+    options: Options,
+}
+
+#[async_trait]
+impl EventHandler for ReactionCounter {
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        eprintln!("Connected as {}!", ready.user.name);
+
+        let typing = self.config.channel_id.start_typing(&ctx.http);
+
+        let toplist = self.scan_channel(&ctx).await;
+
+        // println!("{:#?}", &toplist.top);
+
+        for (emoji, list) in toplist.top.iter() {
+            self.post_toplist_thread(&ctx, emoji, list).await.expect("unable to create message");
+        }
+
+        typing.map(Typing::stop).err().map(|e| eprintln!("wasn't able to (un-)set typing status; {:?}", e));
+
+        self.shutdown(&ctx).await;
+    }
+}
+
+impl ReactionCounter {
+
+    async fn scan_channel<'c>(&'c self, ctx: &Context) -> Toplist<'c> {
+        let channel_id = self.config.channel_id;
+        eprintln!("Scanning channel {:?} over {:?}", channel_id, self.options.calendar_week);
+
+        let start_time = time_utils::iso_week_to_datetime(self.options.calendar_week);
+        let end_time = start_time + chrono::Duration::weeks(1);
+        eprintln!("Time span: {:?} til {:?}", start_time, end_time);
+
+        let mut toplist = Toplist::new(&self.config);
+        let mut first_id: MessageId = (time_utils::time_snowflake(start_time, false) - 1).into();
+
+        'outer: for page in 1.. {
+            eprintln!("Fetching page {} (after {})", page, time_utils::snowflake_time(first_id));
+            let msgs = channel_id
+                .messages(&ctx.http, |retriever| retriever.after(first_id).limit(100))
+                .await
+                .unwrap();
+            eprintln!("Retrieved {} messages", msgs.len());
+
+            first_id = match msgs.first() {
+                Some(first) => first.id,
+                None => break,
+            };
+
+            for msg in &msgs {
+                if msg.timestamp > end_time {
+                    break 'outer;
+                }
+                toplist.append(msg);
+            }
+        }
+
+        eprintln!("Finished collecting messages");
+        toplist
+    }
+
+    async fn post_toplist_thread(&self, ctx: &Context, emoji: &Option<Emoji>, list: &BTreeSet<MsgWrap>) -> Result<(), SerenityError> {
+        eprintln!("Creating thread for {:?}", emoji);
+        let thread = self.create_thread(ctx, emoji).await;
+
+        eprintln!("Starting to populate thread for {:?}", emoji);
+        for (i, item) in list.iter().enumerate() {
+            thread.send_message(&ctx.http, |msg| {
+                msg.content(format!("```\n{}\n```", i + 1))
+            }).await?;
+
+            thread.send_message(&ctx.http, |msg| {
+                msg.content(format!("{}", &item.content))
+            }).await?;
+
+            thread.send_message(&ctx.http, |msg| {
+                msg.content(format!("by {}", &item.message.author));
+                msg.add_embed(|embed| {
+                    embed.title("  ");
+                    let reaction_strs: Vec<_> = item.message.reactions
+                        .iter()
+                        .map(|r| format!("{} {}", reaction_for_message(&r.reaction_type), r.count - r.me as u64))
+                        .collect();
+                    embed.description(
+                        format!("{} | [link]({})", reaction_strs.join(" | "), item.message.link())
+                    )
+                });
+                msg.allowed_mentions(|am| am.empty_users())
+            }).await?;
+        }
+
+        eprintln!("Done populating thread for {:?}", emoji);
+        Ok(())
+    }
+
+    async fn create_thread(&self, ctx: &Context, emoji: &Option<Emoji>) -> GuildChannel {
+        let name = format!(
+            "{:?} - {}",
+            self.options.calendar_week,
+            emoji.as_ref().map(emoji_as_string).unwrap_or("Other"),
+        );
+        let channel = self.config.channel_id.to_channel(&ctx.http)
+            .await
+            .unwrap()
+            .guild()
+            .unwrap();
+        channel.create_private_thread(&ctx.http, |thread| {
+            thread.name(name);
+            thread.auto_archive_duration(10080);
+            thread.kind(ChannelType::PublicThread)
+        }).await.expect("No permissions to create thread!")
+    }
+
+    async fn shutdown(&self, ctx: &Context) {
+        let data = ctx.data.read().await;
+        if let Some(manager) = data.get::<ShardManagerContainer>() {
+            eprintln!("Shutting down...");
+            manager.lock().await.shutdown_all().await;
+        } else {
+            eprintln!("There was a problem getting the shard manager");
+        }
+    }
+}
+
+
+
+fn emoji_as_string(emoji: &Emoji) -> &str {
+    match emoji {
+        Emoji::Custom { name, .. } => name,
+        Emoji::Unicode { string } => string,
+    }
+}
+
+
+pub fn reaction_for_message(reaction: &ReactionType) -> String {
+    match &reaction {
+        ReactionType::Custom { name, id, .. } => format!("<:{}:{}>", name.as_deref().unwrap_or("no_name"), id.0),
+        ReactionType::Unicode(string) => string.clone(),
+        _ => "?".to_string(),
     }
 }
