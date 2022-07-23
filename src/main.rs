@@ -145,7 +145,8 @@ impl ReactionCounter {
             }).await?;
 
             thread.send_message(&ctx.http, |msg| {
-                msg.content(format!("{}", &item.content))
+                msg.content(format!("{}", &item.content));
+                msg.allowed_mentions(|am| am.empty_parse())
             }).await?;
 
             thread.send_message(&ctx.http, |msg| {
@@ -160,7 +161,7 @@ impl ReactionCounter {
                         format!("{} | [link]({})", reaction_strs.join(" | "), item.message.link())
                     )
                 });
-                msg.allowed_mentions(|am| am.empty_users())
+                msg.allowed_mentions(|am| am.empty_parse())
             }).await?;
         }
 
