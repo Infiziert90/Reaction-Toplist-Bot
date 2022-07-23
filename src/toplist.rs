@@ -29,9 +29,9 @@ impl<'c> Toplist<'c> {
     pub fn append(&mut self, message: &Message) {
         let content = self.find_content(message);
 
-        self.append_known(message, &content);
-        if self.config.other.enabled {
-            self.append_other(message, &content);
+        let handled = self.append_known(message, &content);
+        if !handled && self.config.other.enabled {
+            self.append_other(message, &content).await?;
         }
     }
 
@@ -48,16 +48,19 @@ impl<'c> Toplist<'c> {
         }
     }
 
-    fn append_known(&mut self, message: &Message, content: &str) {
+    fn append_known(&mut self, message: &Message, content: &str) -> bool {
+        let mut appended = false;
         for entry in self.config.toplist.iter() {
             let count_opt = message.reactions.iter().find_map(|r| is_same_emoji(r, &entry.emoji).then_some(r.count));
             if let Some(count) = count_opt {
                 if let Some(list) = self.prepate_for_insert(Some(entry.emoji.clone()), entry.max, count) {
                     let msg_wrap = MsgWrap { count, message: message.clone(), content: content.to_string() };
                     list.insert(msg_wrap);
+                    appended = true;
                 }
             }
         }
+        appended
     }
 
     fn append_other(&mut self, message: &Message, content: &str) {
