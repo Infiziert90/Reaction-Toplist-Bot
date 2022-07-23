@@ -136,7 +136,6 @@ impl ReactionCounter {
     }
 
     async fn post_toplist_thread(&self, ctx: &Context, emoji: &Option<Emoji>, list: &BTreeSet<MsgWrap>) -> Result<(), SerenityError> {
-        eprintln!("Creating thread for {:?}", emoji);
         let thread = self.create_thread(ctx, emoji).await;
 
         eprintln!("Starting to populate thread for {:?}", emoji);
@@ -176,16 +175,19 @@ impl ReactionCounter {
     }
 
     async fn create_thread(&self, ctx: &Context, emoji: &Option<Emoji>) -> GuildChannel {
+        let channel_id = self.config.target_channel_id.unwrap_or(self.config.channel_id);
+        let channel = channel_id.to_channel(&ctx.http)
+            .await
+            .unwrap()
+            .guild()
+            .unwrap();
         let name = format!(
             "{:?} - {}",
             self.options.calendar_week,
             emoji.as_ref().map(emoji_as_string).unwrap_or("Other"),
         );
-        let channel = self.config.channel_id.to_channel(&ctx.http)
-            .await
-            .unwrap()
-            .guild()
-            .unwrap();
+
+        eprintln!("Creating thread for {:?} in {:?}", emoji, channel_id);
         channel.create_private_thread(&ctx.http, |thread| {
             thread.name(name);
             thread.auto_archive_duration(10080);
