@@ -48,7 +48,6 @@ impl<'c> Toplist<'c> {
                 let links: Vec<_> = self.link_finder.links(&message.content).collect();
                 links.first()
                     .map(|s| s.as_str().to_string())
-                    // TODO or discard if no link?
                     .unwrap_or_else(|| message.content.clone())
             }
         }
