@@ -4,6 +4,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use std::env;
 use std::error::Error;
 use std::path::Path;
+use serenity::model::prelude::CurrentUser;
 use serenity::{
     async_trait,
     client::bridge::gateway::ShardManager,
@@ -82,7 +83,7 @@ impl EventHandler for ReactionCounter {
 
         let typing = self.config.channel_id.start_typing(&ctx.http);
 
-        let toplist = self.scan_channel(&ctx).await;
+        let toplist = self.scan_channel(&ctx, &ready.user).await;
 
         // println!("{:#?}", &toplist.top);
 
@@ -98,7 +99,7 @@ impl EventHandler for ReactionCounter {
 
 impl ReactionCounter {
 
-    async fn scan_channel<'c>(&'c self, ctx: &Context) -> Toplist<'c> {
+    async fn scan_channel<'c>(&'c self, ctx: &Context, user: &CurrentUser) -> Toplist<'c> {
         let channel_id = self.config.channel_id;
         eprintln!("Scanning channel {:?} over {:?}", channel_id, self.options.calendar_week);
 
@@ -106,7 +107,7 @@ impl ReactionCounter {
         let end_time = start_time + chrono::Duration::weeks(1);
         eprintln!("Time span: {:?} til {:?}", start_time, end_time);
 
-        let mut toplist = Toplist::new(&self.config);
+        let mut toplist = Toplist::new(&self.config, user, ctx.http.clone());
         let mut first_id: MessageId = (time_utils::time_snowflake(start_time, false) - 1).into();
 
         'outer: for page in 1.. {
@@ -126,7 +127,7 @@ impl ReactionCounter {
                 if msg.timestamp > end_time {
                     break 'outer;
                 }
-                toplist.append(msg);
+                toplist.append(msg).await.expect("unable to fetch reaction users");
             }
         }
 
@@ -141,7 +142,12 @@ impl ReactionCounter {
         eprintln!("Starting to populate thread for {:?}", emoji);
         for (i, item) in list.iter().enumerate() {
             thread.send_message(&ctx.http, |msg| {
-                msg.content(format!("```\n{}\n```", i + 1))
+                msg.content(format!(
+                    "```md\n**{}** ({} user{})\n```",
+                    i + 1,
+                    item.count,
+                    if item.count == 1 { "" } else { "s" },
+                ))
             }).await?;
 
             thread.send_message(&ctx.http, |msg| {

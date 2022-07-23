@@ -1,4 +1,7 @@
 channel_id = 292651939555049472
+# Configure how many users we'll fetch for a single reaction.
+# Supports 100 at maximum (more requires code changes).
+per_reaction_limit = 50 # this is the default
 
 [[toplist]]
 max = 15 # this is the default

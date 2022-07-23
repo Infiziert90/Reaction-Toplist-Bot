@@ -7,9 +7,15 @@ fn default_max() -> usize {
     15
 }
 
+fn default_per_reaction_limit() -> u8 {
+    50
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub channel_id: ChannelId,
+    #[serde(default = "default_per_reaction_limit")]
+    pub per_reaction_limit: u8,
     pub toplist: Vec<Toplist>,
     pub other: Other,
 }

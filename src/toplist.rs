@@ -1,38 +1,44 @@
 use std::cmp::Ordering;
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{HashMap, BTreeSet, HashSet};
+use std::sync::Arc;
 
 use linkify::LinkFinder;
+use serenity::futures::future::try_join_all;
+use serenity::http::Http;
 use serenity::model::channel::{Message, ReactionType, MessageReaction};
+use serenity::model::prelude::CurrentUser;
+use serenity::prelude::SerenityError;
 
 use crate::config::{Config, Emoji};
 
 #[derive(Debug)]
 pub struct Toplist<'c> {
     config: &'c Config,
+    current_user: CurrentUser,
+    http: Arc<Http>,
     pub top: HashMap<Option<Emoji>, BTreeSet<MsgWrap>>,
     link_finder: LinkFinder,
-    other_ignore: Vec<Emoji>,
 }
 
 impl<'c> Toplist<'c> {
-    pub fn new(config: &'c Config) -> Self {
-        let mut other_ignore = config.other.ignore.clone();
-        other_ignore.extend(config.toplist.iter().map(|e| e.emoji.clone()));
+    pub fn new(config: &'c Config, current_user: &CurrentUser, http: Arc<Http>) -> Self {
         Toplist {
             config,
+            current_user: current_user.clone(),
+            http,
             top: HashMap::new(),
             link_finder: LinkFinder::new(),
-            other_ignore,
         }
     }
 
-    pub fn append(&mut self, message: &Message) {
+    pub async fn append(&mut self, message: &Message) -> Result<(), SerenityError> {
         let content = self.find_content(message);
 
         let handled = self.append_known(message, &content);
         if !handled && self.config.other.enabled {
             self.append_other(message, &content).await?;
         }
+        Ok(())
     }
 
     fn find_content(&self, message: &Message) -> String {
@@ -63,19 +69,21 @@ impl<'c> Toplist<'c> {
         appended
     }
 
-    fn append_other(&mut self, message: &Message, content: &str) {
-        // TODO Unfortunately we cannot count distinct reactors here
+    async fn append_other(&mut self, message: &Message, content: &str) -> Result<(), SerenityError> {
         let stripped_reactions: Vec<_> = message.reactions.iter()
-            .filter(|r| !self.other_ignore.iter().any(|ignore| is_same_emoji(r, ignore)))
+            .filter(|r| !self.config.other.ignore.iter().any(|ignore| is_same_emoji(r, ignore)))
             .cloned()
             .collect();
-        let count: u64 = stripped_reactions.iter().map(|e| e.count - e.me as u64).sum();
+
+        let count = self.count_distinct_users(&stripped_reactions, message).await?;
+
         if let Some(list) = self.prepate_for_insert(None, self.config.other.max, count) {
             let mut message = message.clone();
             message.reactions = stripped_reactions;
             let msg_wrap = MsgWrap { count, message, content: content.to_string() };
             list.insert(msg_wrap);
         };
+        Ok(())
     }
 
     fn prepate_for_insert(&mut self, emoji: Option<Emoji>, max: usize, count: u64) -> Option<&mut BTreeSet<MsgWrap>> {
@@ -91,6 +99,25 @@ impl<'c> Toplist<'c> {
             list.pop_first();
         }
         Some(list)
+    }
+
+    async fn count_distinct_users(&mut self, reactions: &[MessageReaction], message: &Message) -> Result<u64, SerenityError> {
+        let futures: Vec<_> = reactions.iter()
+            .map(|r| message.reaction_users(
+                &self.http,
+                r.reaction_type.clone(),
+                Some(self.config.per_reaction_limit),
+                None
+            ))
+            .collect();
+
+        let mut users: HashSet<_> = try_join_all(futures).await?
+            .iter()
+            .flat_map(|users| users.into_iter().map(|user| user.id))
+            .collect();
+
+        users.remove(&self.current_user.id);
+        Ok(users.len() as u64)
     }
 }
 
