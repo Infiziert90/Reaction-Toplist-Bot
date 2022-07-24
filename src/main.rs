@@ -4,6 +4,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use std::env;
 use std::error::Error;
 use std::path::Path;
+use serenity::model::id::GuildId;
 use serenity::model::prelude::CurrentUser;
 use serenity::{
     async_trait,
@@ -69,6 +70,14 @@ impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
 }
 
+
+struct CurrentUserContainer;
+
+impl TypeMapKey for CurrentUserContainer {
+    type Value = CurrentUser;
+}
+
+
 struct ReactionCounter {
     /// file-based configuration
     config: Config,
@@ -79,11 +88,22 @@ struct ReactionCounter {
 #[async_trait]
 impl EventHandler for ReactionCounter {
     async fn ready(&self, ctx: Context, ready: Ready) {
-        eprintln!("Connected as {}!", ready.user.name);
+        eprintln!("Connected as {}! Waiting for cache...", ready.user.name);
+        let mut data = ctx.data.write().await;
+        data.insert::<CurrentUserContainer>(ready.user.clone());
+    }
+
+    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
+        eprintln!("Cache ready");
 
         let typing = self.config.target_channel_id().start_typing(&ctx.http);
 
-        let toplist = self.scan_channel(&ctx, &ready.user).await;
+        let user = {
+            let data = ctx.data.read().await;
+            data.get::<CurrentUserContainer>().unwrap().clone()
+        };
+
+        let toplist = self.scan_channel(&ctx, &user).await;
 
         // println!("{:#?}", &toplist.top);
 
