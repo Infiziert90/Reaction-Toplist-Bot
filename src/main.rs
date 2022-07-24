@@ -236,7 +236,6 @@ impl ReactionCounter {
 }
 
 
-
 fn emoji_as_string(emoji: &Emoji) -> &str {
     match emoji {
         Emoji::Custom { name, .. } => name,
@@ -244,10 +243,14 @@ fn emoji_as_string(emoji: &Emoji) -> &str {
     }
 }
 
-
-pub fn reaction_for_message(reaction: &ReactionType) -> String {
+fn reaction_for_message(reaction: &ReactionType) -> String {
     match &reaction {
-        ReactionType::Custom { name, id, .. } => format!("<:{}:{}>", name.as_deref().unwrap_or("no_name"), id.0),
+        ReactionType::Custom { name, id, animated, .. } => format!(
+            "<{}:{}:{}>",
+            if *animated { "a" } else { "" },
+            name.as_deref().unwrap_or("no_name"),
+            id.0,
+        ),
         ReactionType::Unicode(string) => string.clone(),
         _ => "?".to_string(),
     }
