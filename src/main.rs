@@ -107,8 +107,17 @@ impl EventHandler for ReactionCounter {
 
         // println!("{:#?}", &toplist.top);
 
-        for (emoji, list) in toplist.top.iter() {
-            self.post_toplist_thread(&ctx, emoji, list).await.expect("unable to create message");
+        let mut emoji_to_post: Vec<_> = self.config.toplist.iter()
+            .map(|item| Some(item.emoji.clone()))
+            .collect();
+        if self.config.other.enabled {
+            emoji_to_post.push(None);
+        }
+
+        for key in emoji_to_post {
+            if let Some(list) = toplist.top.get(&key) {
+                self.post_toplist_thread(&ctx, &key, list).await.expect("unable to create message");
+            }
         }
 
         typing.map(Typing::stop).err().map(|e| eprintln!("wasn't able to (un-)set typing status; {:?}", e));
