@@ -56,7 +56,8 @@ impl<'c> Toplist<'c> {
     fn append_known(&mut self, message: &Message, content: &str) -> bool {
         let mut appended = false;
         for entry in self.config.toplist.iter() {
-            let count_opt = message.reactions.iter().find_map(|r| is_same_emoji(r, &entry.emoji).then_some(r.count));
+            let count_opt = message.reactions.iter()
+                .find_map(|r| is_same_emoji(r, &entry.emoji).then_some(r.count - r.me as u64));
             if let Some(count) = count_opt {
                 if let Some(list) = self.prepate_for_insert(Some(entry.emoji.clone()), entry.max, count) {
                     let msg_wrap = MsgWrap { count, message: message.clone(), content: content.to_string() };
