@@ -15,8 +15,16 @@ to invite [a bot from your applications](https://discordapp.com/developers/appli
 to your server:
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=<insert_client_id_here>&scope=bot&permissions=309237727232
+https://discord.com/api/oauth2/authorize?client_id=<insert_client_id_here>&scope=bot&permissions=309237989376
 ```
+
+The permissions are as follows:
+
+- Create Public Threads
+- Send Messages in Threads
+- Embed Links
+- Read Message History
+- Use External Emoji
 
 Refer also to [the Discord OAuth2 documentation](https://discordapp.com/developers/docs/topics/oauth2).
 
@@ -53,3 +61,10 @@ $ reaction_toplist_bot
 $ reaction_toplist_bot -1
 $ reaction_toplist_bot 2022-10
 ```
+
+## Known Issues
+
+- The Bot cannot post emoji from other servers
+  that it is not a member of itself;
+  they will render as `:emoji_name:` instead.
+  This is a Discord limitation.
