@@ -31,6 +31,10 @@ impl Config {
         let contents = std::fs::read_to_string(path)?;
         Ok(toml::from_str(&contents)?)
     }
+
+    pub fn target_channel_id(&self) -> ChannelId {
+        self.target_channel_id.unwrap_or(self.channel_id)
+    }
 }
 
 

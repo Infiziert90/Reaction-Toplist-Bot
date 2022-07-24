@@ -81,7 +81,7 @@ impl EventHandler for ReactionCounter {
     async fn ready(&self, ctx: Context, ready: Ready) {
         eprintln!("Connected as {}!", ready.user.name);
 
-        let typing = self.config.channel_id.start_typing(&ctx.http);
+        let typing = self.config.target_channel_id().start_typing(&ctx.http);
 
         let toplist = self.scan_channel(&ctx, &ready.user).await;
 
@@ -175,7 +175,7 @@ impl ReactionCounter {
     }
 
     async fn create_thread(&self, ctx: &Context, emoji: &Option<Emoji>) -> GuildChannel {
-        let channel_id = self.config.target_channel_id.unwrap_or(self.config.channel_id);
+        let channel_id = self.config.target_channel_id();
         let channel = channel_id.to_channel(&ctx.http)
             .await
             .unwrap()
