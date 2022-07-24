@@ -142,8 +142,8 @@ impl ReactionCounter {
         for (i, item) in list.iter().enumerate() {
             thread.send_message(&ctx.http, |msg| {
                 msg.content(format!(
-                    "```md\n**{}** ({} user{})\n```",
-                    i + 1,
+                    "```c\n{} // {} user{}\n```",
+                    list.len() - i,
                     item.count,
                     if item.count == 1 { "" } else { "s" },
                 ))
