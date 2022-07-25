@@ -184,7 +184,7 @@ impl ReactionCounter {
             }).await?;
 
             thread.send_message(&ctx.http, |msg| {
-                msg.content(format!("by {}", &item.message.author));
+                msg.content(format!("by {} ({})", &item.message.author, &item.message.author.name));
                 msg.add_embed(|embed| {
                     embed.title("  ");
                     let reaction_strs: Vec<_> = item.message.reactions
