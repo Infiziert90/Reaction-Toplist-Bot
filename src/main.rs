@@ -96,8 +96,6 @@ impl EventHandler for ReactionCounter {
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
         eprintln!("Cache ready");
 
-        let typing = self.config.target_channel_id().start_typing(&ctx.http);
-
         let user = {
             let data = ctx.data.read().await;
             data.get::<CurrentUserContainer>().unwrap().clone()
@@ -106,6 +104,8 @@ impl EventHandler for ReactionCounter {
         let toplist = self.scan_channel(&ctx, &user).await;
 
         // println!("{:#?}", &toplist.top);
+
+        let typing = self.config.target_channel_id().start_typing(&ctx.http);
 
         let mut emoji_to_post: Vec<_> = self.config.toplist.iter()
             .map(|item| Some(item.emoji.clone()))
