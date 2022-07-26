@@ -11,14 +11,10 @@ fn default_per_reaction_limit() -> u8 {
     50
 }
 
-fn default_none<T>() -> Option<T> {
-    None
-}
-
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub channel_id: ChannelId,
-    #[serde(default = "default_none")]
+    #[serde(default)]
     pub target_channel_id: Option<ChannelId>,
     #[serde(default = "default_per_reaction_limit")]
     pub per_reaction_limit: u8,
