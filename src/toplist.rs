@@ -16,7 +16,9 @@ pub struct Toplist<'c> {
     config: &'c Config,
     current_user: CurrentUser,
     http: Arc<Http>,
-    pub top: HashMap<Option<Emoji>, BTreeSet<MsgWrap>>,
+    pub top: HashMap<Emoji, BTreeSet<MsgWrap>>,
+    pub other_prep: BTreeSet<MsgWrap>,
+    pub other: BTreeSet<MsgWrap>,
     link_finder: LinkFinder,
 }
 
@@ -26,19 +28,20 @@ impl<'c> Toplist<'c> {
             config,
             current_user: current_user.clone(),
             http,
-            top: HashMap::new(),
-            link_finder: LinkFinder::new(),
+            top: Default::default(),
+            other_prep: Default::default(),
+            other: Default::default(),
+            link_finder: Default::default(),
         }
     }
 
-    pub async fn append(&mut self, message: &Message) -> Result<(), SerenityError> {
+    pub fn append(&mut self, message: &Message) {
         let content = self.find_content(message);
 
-        let handled = self.append_known(message, &content);
-        if !handled && self.config.other.enabled {
-            self.append_other(message, &content).await?;
+        self.append_known(message, &content);
+        if self.config.other.enabled {
+            self.append_other(message, &content);
         }
-        Ok(())
     }
 
     fn find_content(&self, message: &Message) -> String {
@@ -53,56 +56,98 @@ impl<'c> Toplist<'c> {
         }
     }
 
-    fn append_known(&mut self, message: &Message, content: &str) -> bool {
-        let mut appended = false;
+    fn append_known(&mut self, message: &Message, content: &str) {
         for entry in self.config.toplist.iter() {
-            let count_opt = message.reactions.iter()
-                .find_map(|r| is_same_emoji(r, &entry.emoji).then_some(r.count - r.me as u64));
-            if let Some(count) = count_opt {
-                if let Some(list) = self.prepate_for_insert(Some(entry.emoji.clone()), entry.max, count) {
-                    let msg_wrap = MsgWrap { count, message: message.clone(), content: content.to_string() };
-                    list.insert(msg_wrap);
-                    appended = true;
-                }
+            let Some(count) = message.reactions.iter()
+                .find_map(|r| is_same_emoji(r, &entry.emoji).then_some(r.count - r.me as u64))
+                else { continue; };
+
+            let list = self.top.entry(entry.emoji.clone()).or_default();
+            if Self::prepare_list_for_insert(list, entry.max, count).is_some() {
+                let msg_wrap = MsgWrap { count, message: message.clone(), content: content.to_string() };
+                list.insert(msg_wrap);
             }
         }
-        appended
     }
 
-    async fn append_other(&mut self, message: &Message, content: &str) -> Result<(), SerenityError> {
+    fn append_other(&mut self, message: &Message, content: &str) {
         let stripped_reactions: Vec<_> = message.reactions.iter()
             .filter(|r| !self.config.other.ignore.iter().any(|ignore| is_same_emoji(r, ignore)))
             .cloned()
             .collect();
 
-        let count = self.count_distinct_users(&stripped_reactions, message).await?;
+        // This is an approximation of the actual count
+        // since it has the number of total reactions
+        // where we want the number of distinct users that reacted.
+        // It serves to maintain rough ordering of the BTreeSet.
+        let count: u64 = stripped_reactions.iter().map(|r| r.count - r.me as u64).sum();
+        if count == 0 {
+            return;
+        }
 
-        if let Some(list) = self.prepate_for_insert(None, self.config.other.max, count) {
-            let mut message = message.clone();
-            message.reactions = stripped_reactions;
-            let msg_wrap = MsgWrap { count, message, content: content.to_string() };
-            list.insert(msg_wrap);
-        };
-        Ok(())
+        let mut message = message.clone();
+        message.reactions = stripped_reactions;
+        let msg_wrap = MsgWrap { count, message, content: content.to_string() };
+        self.other_prep.insert(msg_wrap);
     }
 
-    fn prepate_for_insert(&mut self, emoji: Option<Emoji>, max: usize, count: u64) -> Option<&mut BTreeSet<MsgWrap>> {
+    fn prepare_list_for_insert(list: &mut BTreeSet<MsgWrap>, max: usize, count: u64) -> Option<u64> {
         if count == 0 {
             return None;
         }
-        let list = self.top.entry(emoji).or_insert_with(BTreeSet::default);
-        let min = list.first().map(|mw| mw.count).unwrap_or(0);
-        if min > count {
-            return None;
-        }
-        if list.len() == max {
+        let min_count = Self::min_count(list, max);
+        let should_insert = count > min_count;
+        if should_insert && min_count > 0 {
             list.pop_first();
         }
-        Some(list)
+        should_insert.then_some(min_count.min(count))
     }
 
-    async fn count_distinct_users(&mut self, reactions: &[MessageReaction], message: &Message) -> Result<u64, SerenityError> {
-        let futures: Vec<_> = reactions.iter()
+    pub async fn finalize(&mut self) -> Result<(), SerenityError> {
+        if !self.config.other.enabled {
+            return Ok(());
+        }
+
+        let ids_to_ignore: HashSet<_> = self.top.values()
+            .flat_map(|list| list.iter().map(|wrap| wrap.message.id))
+            .collect();
+
+        eprintln!(
+            "Starting to fill 'Other' toplist (from {} messages, ignoring {})",
+            self.other_prep.len(),
+            ids_to_ignore.len(),
+        );
+
+        let mut min = 0;
+        for wrap in self.other_prep.iter().rev() {
+            if wrap.count <= min {
+                // Impossible to have more unique users than sum of reactions
+                break;
+            }
+            if ids_to_ignore.contains(&wrap.message.id) {
+                continue;
+            }
+
+            let count = self.count_distinct_users(&wrap.message).await?;
+            let Some(new_min) = Self::prepare_list_for_insert(&mut self.other, self.config.other.max, count)
+                else { continue; };
+            let new_wrap = MsgWrap { count, ..wrap.clone() };
+            self.other.insert(new_wrap);
+            min = new_min;
+        }
+        Ok(())
+    }
+
+    fn min_count(list: &BTreeSet<MsgWrap>, max_entries: usize) -> u64 {
+        if list.len() < max_entries {
+            0
+        } else {
+            list.first().map(|mw| mw.count).unwrap_or(0)
+        }
+    }
+
+    async fn count_distinct_users(&self, message: &Message) -> Result<u64, SerenityError> {
+        let futures: Vec<_> = message.reactions.iter()
             .map(|r| message.reaction_users(
                 &self.http,
                 r.reaction_type.clone(),
@@ -131,7 +176,7 @@ fn is_same_emoji(r: &MessageReaction, emoji: &Emoji) -> bool {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MsgWrap {
     pub count: u64, // must be first for auto-deriving ordering
     pub content: String,

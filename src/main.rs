@@ -1,4 +1,4 @@
-#![feature(map_first_last, slice_concat_trait)]
+#![feature(map_first_last, slice_concat_trait, let_else)]
 
 use std::{collections::BTreeSet, sync::Arc};
 use std::env;
@@ -107,17 +107,17 @@ impl EventHandler for ReactionCounter {
 
         let typing = self.config.target_channel_id().start_typing(&ctx.http);
 
-        let mut emoji_to_post: Vec<_> = self.config.toplist.iter()
-            .map(|item| Some(item.emoji.clone()))
+        let emoji_to_post: Vec<_> = self.config.toplist.iter()
+            .map(|item| &item.emoji)
             .collect();
-        if self.config.other.enabled {
-            emoji_to_post.push(None);
-        }
 
         for key in emoji_to_post {
             if let Some(list) = toplist.top.get(&key) {
-                self.post_toplist_thread(&ctx, &key, list).await.expect("unable to create message");
+                self.post_toplist_thread(&ctx, &Some(key.clone()), list).await.expect("unable to create message");
             }
+        }
+        if self.config.other.enabled {
+            self.post_toplist_thread(&ctx, &None, &toplist.other).await.expect("unable to create message");
         }
 
         typing.map(Typing::stop).err().map(|e| eprintln!("wasn't able to (un-)set typing status; {:?}", e));
@@ -156,9 +156,11 @@ impl ReactionCounter {
                 if msg.timestamp > end_time {
                     break 'outer;
                 }
-                toplist.append(msg).await.expect("unable to fetch reaction users");
+                toplist.append(msg);
             }
         }
+
+        toplist.finalize().await.expect("unable to fetch reaction users");
 
         eprintln!("Finished collecting messages");
         toplist
