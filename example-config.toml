@@ -1,0 +1,33 @@
+# Which channel to scan messages in.
+channel_id = 292651939555049472
+
+# Specify the channel to create threads in.
+# Defaults to the same as `channel_id`.
+target_channel_id = 292651939555049472
+
+# Configure how many users we'll fetch for a single reaction.
+# Supports 100 at maximum (more requires code changes).
+per_reaction_limit = 50 # this is the default
+
+[[toplist]]
+max = 15 # this is the default
+# Format for custom emoji.
+emoji.name = "yes"
+emoji.id = 1000377617683333210
+
+[[toplist]]
+emoji.name = "no"
+emoji.id = 688706987290394635
+
+[[toplist]]
+# Format for default twemoji.
+# Note that some emojis have extra characters (e.g. "♻\ufe0f").
+emoji.string = "🙃"
+
+[other]
+enabled = true
+max = 15 # also the default
+ignore = [
+    # Uses the same formats as inside `toplist`.
+    { string = "♻\ufe0f" },
+]
