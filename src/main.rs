@@ -170,11 +170,23 @@ impl ReactionCounter {
         let thread = self.create_thread(ctx, emoji).await;
 
         eprintln!("Starting to populate thread for {:?}", emoji);
-        for (i, item) in list.iter().enumerate() {
+
+        let items_with_rank: Vec<_> = list.iter()
+            .rev()
+            .enumerate()
+            .scan((0, 0), |(rank, count), (i, item)| {
+                if *count != item.count {
+                    *rank = i + 1;
+                }
+                *count = item.count;
+                Some((item, *rank))
+            })
+            .collect();
+        for (item, rank) in items_with_rank.into_iter().rev() {
             thread.send_message(&ctx.http, |msg| {
                 msg.content(format!(
                     "```c\n{} // {} user{}\n```",
-                    list.len() - i,
+                    rank,
                     item.count,
                     if item.count == 1 { "" } else { "s" },
                 ))
