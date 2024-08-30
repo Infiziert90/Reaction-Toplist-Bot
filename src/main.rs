@@ -1,4 +1,4 @@
-#![feature(map_first_last, slice_concat_trait, let_else)]
+#![feature(slice_concat_trait)]
 
 use std::{collections::BTreeSet, sync::Arc};
 use std::env;
