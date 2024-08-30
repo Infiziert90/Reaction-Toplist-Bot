@@ -5,7 +5,7 @@ pub fn parse_iso_week(week_param_opt: Option<&str>) -> Result<IsoWeek, Box<dyn s
     let first_char = week_param.chars().next().ok_or("week parameter empty")?;
     if first_char == '+' || first_char == '-' {
         let week_offset: i64 = week_param.parse()?;
-        let today = Local::today();
+        let today = Local::now();
         let target_day = today + Duration::weeks(week_offset);
         Ok(target_day.iso_week())
     } else {
@@ -16,8 +16,8 @@ pub fn parse_iso_week(week_param_opt: Option<&str>) -> Result<IsoWeek, Box<dyn s
 }
 
 pub fn iso_week_to_datetime(naive: IsoWeek) -> DateTime<Utc> {
-    let naive_date = NaiveDate::from_isoywd(naive.year(), naive.week(), Weekday::Mon);
-    DateTime::from_utc(naive_date.and_hms(0, 0, 0), Utc)
+    let naive_date = NaiveDate::from_isoywd_opt(naive.year(), naive.week(), Weekday::Mon).unwrap();
+    DateTime::from_naive_utc_and_offset(naive_date.and_hms_opt(0, 0, 0).unwrap(), Utc)
 }
 
 
@@ -42,6 +42,6 @@ pub fn time_snowflake(datetime: DateTime<Utc>, high: bool) -> u64 {
 
 /// Extract the timestamp of a snowflake (id).
 pub fn snowflake_time<T: Into<u64>>(id: T) -> DateTime<Utc> {
-    Utc.timestamp_millis(((id.into() >> 22) + DISCORD_EPOCH) as i64)
+    Utc.timestamp_millis_opt(((id.into() >> 22) + DISCORD_EPOCH) as i64).unwrap()
 }
 
