@@ -4,6 +4,8 @@ use std::{collections::BTreeSet, sync::Arc};
 use std::env;
 use std::error::Error;
 use std::path::Path;
+use chrono::{DateTime, Utc};
+use serenity::model::gateway::GatewayIntents;
 use serenity::model::id::GuildId;
 use serenity::model::prelude::CurrentUser;
 use serenity::{
@@ -39,7 +41,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("token missing");
-    let mut client = Client::builder(token)
+    let mut client = Client::builder(token, GatewayIntents::GUILD_MESSAGES)
         .event_handler(ReactionCounter { config, options })
         .await
         .expect("Error creating client");
@@ -133,7 +135,8 @@ impl ReactionCounter {
         eprintln!("Scanning channel {:?} over {:?}", channel_id, self.options.calendar_week);
 
         let start_time = time_utils::iso_week_to_datetime(self.options.calendar_week);
-        let end_time = start_time + chrono::Duration::weeks(1);
+        // let end_time = start_time + chrono::Duration::weeks(1);
+        let end_time = start_time + chrono::Duration::days(1);
         eprintln!("Time span: {:?} til {:?}", start_time, end_time);
 
         let mut toplist = Toplist::new(&self.config, user, ctx.http.clone());
@@ -148,12 +151,12 @@ impl ReactionCounter {
             eprintln!("Retrieved {} messages", msgs.len());
 
             first_id = match msgs.first() {
-                Some(first) => first.id,
+                Some(first) => first.id.into(),
                 None => break,
             };
 
             for msg in &msgs {
-                if msg.timestamp > end_time {
+                if (&msg.timestamp as &DateTime<Utc>) > &end_time {
                     break 'outer;
                 }
                 toplist.append(msg);
