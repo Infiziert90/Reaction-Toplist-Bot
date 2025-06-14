@@ -1,29 +1,39 @@
-#![feature(map_first_last, slice_concat_trait, let_else)]
+#![feature(slice_concat_trait)]
 
-use std::{collections::BTreeSet, sync::Arc};
-use std::env;
-use std::error::Error;
-use std::path::Path;
+use chrono::{DateTime, Utc};
+use serenity::all::{
+    AutoArchiveDuration, CreateAllowedMentions, CreateEmbed, CreateMessage, CreateThread,
+    GetMessages,
+};
+use serenity::model::gateway::GatewayIntents;
 use serenity::model::id::GuildId;
 use serenity::model::prelude::CurrentUser;
 use serenity::{
     async_trait,
-    client::bridge::gateway::ShardManager,
-    http::Typing,
+    gateway::ShardManager,
     model::{
-        channel::{ChannelType, GuildChannel, ReactionType},
+        channel::{ChannelType, GuildChannel},
         gateway::Ready,
         id::MessageId,
     },
-    prelude::{Client, Context, SerenityError, Mutex, TypeMapKey, EventHandler},
+    prelude::{Client, Context, EventHandler, SerenityError, TypeMapKey},
 };
+use std::env;
+use std::error::Error;
+use std::path::Path;
+use std::{collections::BTreeSet, sync::Arc};
 
 mod config;
-mod toplist;
 mod time_utils;
+mod toplist;
 
 use config::{Config, Emoji};
-use toplist::{Toplist, MsgWrap};
+use toplist::{MsgWrap, Toplist};
+
+// https://discord.com/developers/docs/events/gateway#gateway-intents
+const GATEWAY_INTENTS: GatewayIntents = GatewayIntents::GUILDS
+    .union(GatewayIntents::GUILD_MESSAGES)
+    .union(GatewayIntents::GUILD_MESSAGE_TYPING);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -32,14 +42,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Parse week from command line argument
     let week_param = std::env::args().nth(1);
     let week_param_str = week_param.as_ref().map(|s| s.as_str());
-    let options = Options { calendar_week: time_utils::parse_iso_week(week_param_str)? };
+    let options = Options {
+        calendar_week: time_utils::parse_iso_week(week_param_str)?,
+    };
 
     eprintln!("Config: {:?}", config);
     eprintln!("Options: {:?}", options);
 
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("token missing");
-    let mut client = Client::builder(token)
+    let mut client = Client::builder(token, GATEWAY_INTENTS)
         .event_handler(ReactionCounter { config, options })
         .await
         .expect("Error creating client");
@@ -67,16 +79,14 @@ struct Options {
 pub struct ShardManagerContainer;
 
 impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<Mutex<ShardManager>>;
+    type Value = Arc<ShardManager>;
 }
-
 
 struct CurrentUserContainer;
 
 impl TypeMapKey for CurrentUserContainer {
     type Value = CurrentUser;
 }
-
 
 struct ReactionCounter {
     /// file-based configuration
@@ -89,8 +99,10 @@ struct ReactionCounter {
 impl EventHandler for ReactionCounter {
     async fn ready(&self, ctx: Context, ready: Ready) {
         eprintln!("Connected as {}! Waiting for cache...", ready.user.name);
-        let mut data = ctx.data.write().await;
-        data.insert::<CurrentUserContainer>(ready.user.clone());
+        {
+            let mut data = ctx.data.write().await;
+            data.insert::<CurrentUserContainer>(ready.user.clone());
+        }
     }
 
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
@@ -103,34 +115,36 @@ impl EventHandler for ReactionCounter {
 
         let toplist = self.scan_channel(&ctx, &user).await;
 
-        // println!("{:#?}", &toplist.top);
-
         let typing = self.config.target_channel_id().start_typing(&ctx.http);
 
-        let emoji_to_post: Vec<_> = self.config.toplist.iter()
-            .map(|item| &item.emoji)
-            .collect();
+        let emoji_to_post: Vec<_> = self.config.toplist.iter().map(|item| &item.emoji).collect();
 
         for key in emoji_to_post {
             if let Some(list) = toplist.top.get(&key) {
-                self.post_toplist_thread(&ctx, &Some(key.clone()), list).await.expect("unable to create message");
+                self.post_toplist_thread(&ctx, &Some(key.clone()), list)
+                    .await
+                    .expect("unable to create message");
             }
         }
         if self.config.other.enabled {
-            self.post_toplist_thread(&ctx, &None, &toplist.other).await.expect("unable to create message");
+            self.post_toplist_thread(&ctx, &None, &toplist.other)
+                .await
+                .expect("unable to create message");
         }
 
-        typing.map(Typing::stop).err().map(|e| eprintln!("wasn't able to (un-)set typing status; {:?}", e));
+        typing.stop();
 
         self.shutdown(&ctx).await;
     }
 }
 
 impl ReactionCounter {
-
     async fn scan_channel<'c>(&'c self, ctx: &Context, user: &CurrentUser) -> Toplist<'c> {
         let channel_id = self.config.channel_id;
-        eprintln!("Scanning channel {:?} over {:?}", channel_id, self.options.calendar_week);
+        eprintln!(
+            "Scanning channel {:?} over {:?}",
+            channel_id, self.options.calendar_week
+        );
 
         let start_time = time_utils::iso_week_to_datetime(self.options.calendar_week);
         let end_time = start_time + chrono::Duration::weeks(1);
@@ -140,38 +154,54 @@ impl ReactionCounter {
         let mut first_id: MessageId = (time_utils::time_snowflake(start_time, false) - 1).into();
 
         'outer: for page in 1.. {
-            eprintln!("Fetching page {} (after {})", page, time_utils::snowflake_time(first_id));
+            eprintln!(
+                "Fetching page {} (after {})",
+                page,
+                time_utils::snowflake_time(first_id)
+            );
             let msgs = channel_id
-                .messages(&ctx.http, |retriever| retriever.after(first_id).limit(100))
+                .messages(&ctx.http, GetMessages::new().after(first_id).limit(100))
                 .await
                 .unwrap();
             eprintln!("Retrieved {} messages", msgs.len());
 
+            // Messages are returned newest to oldest
             first_id = match msgs.first() {
-                Some(first) => first.id,
+                Some(first) => first.id.into(),
                 None => break,
             };
 
             for msg in &msgs {
-                if msg.timestamp > end_time {
+                if (&msg.timestamp as &DateTime<Utc>) > &end_time {
                     break 'outer;
                 }
-                toplist.append(msg);
+                if !msg.reactions.is_empty() {
+                    toplist.append(msg).await;
+                }
             }
         }
 
-        toplist.finalize().await.expect("unable to fetch reaction users");
+        toplist
+            .finalize()
+            .await
+            .expect("unable to fetch reaction users");
 
         eprintln!("Finished collecting messages");
         toplist
     }
 
-    async fn post_toplist_thread(&self, ctx: &Context, emoji: &Option<Emoji>, list: &BTreeSet<MsgWrap>) -> Result<(), SerenityError> {
+    async fn post_toplist_thread(
+        &self,
+        ctx: &Context,
+        emoji: &Option<Emoji>,
+        list: &BTreeSet<MsgWrap>,
+    ) -> Result<(), SerenityError> {
         let thread = self.create_thread(ctx, emoji).await;
 
         eprintln!("Starting to populate thread for {:?}", emoji);
 
-        let items_with_rank: Vec<_> = list.iter()
+        let items_with_rank: Vec<_> = list
+            .iter()
             .rev()
             .enumerate()
             .scan((0, 0), |(rank, count), (i, item)| {
@@ -182,35 +212,51 @@ impl ReactionCounter {
                 Some((item, *rank))
             })
             .collect();
+
         for (item, rank) in items_with_rank.into_iter().rev() {
-            thread.send_message(&ctx.http, |msg| {
-                msg.content(format!(
-                    "```c\n{} // {} user{}\n```",
-                    rank,
-                    item.count,
-                    if item.count == 1 { "" } else { "s" },
-                ))
-            }).await?;
+            thread
+                .send_message(
+                    &ctx.http,
+                    CreateMessage::new().content(format!(
+                        "```c\n{} // {} user{}\n```",
+                        rank,
+                        item.count,
+                        if item.count == 1 { "" } else { "s" },
+                    )),
+                )
+                .await?;
 
-            thread.send_message(&ctx.http, |msg| {
-                msg.content(format!("{}", &item.content));
-                msg.allowed_mentions(|am| am.empty_parse())
-            }).await?;
+            thread
+                .send_message(
+                    &ctx.http,
+                    CreateMessage::new()
+                        .content(format!("{}", &item.content))
+                        .allowed_mentions(CreateAllowedMentions::new()),
+                )
+                .await?;
 
-            thread.send_message(&ctx.http, |msg| {
-                msg.content(format!("by {} ({})", &item.message.author, &item.message.author.name));
-                msg.add_embed(|embed| {
-                    embed.title("  ");
-                    let reaction_strs: Vec<_> = item.message.reactions
-                        .iter()
-                        .map(|r| format!("{} {}", reaction_for_message(&r.reaction_type), r.count - r.me as u64))
-                        .collect();
-                    embed.description(
-                        format!("{} | [link]({})", reaction_strs.join(" | "), item.message.link())
-                    )
-                });
-                msg.allowed_mentions(|am| am.empty_parse())
-            }).await?;
+            let reaction_strs: Vec<_> = item
+                .message
+                .reactions
+                .iter()
+                .map(|r| format!("{} {}", &r.reaction_type, r.count - r.me as u64))
+                .collect();
+            thread
+                .send_message(
+                    &ctx.http,
+                    CreateMessage::new()
+                        .content(format!(
+                            "by {} ({})",
+                            &item.message.author, &item.message.author.name
+                        ))
+                        .embed(CreateEmbed::new().title("  ").description(format!(
+                            "{} | [link]({})",
+                            reaction_strs.join(" | "),
+                            item.message.link()
+                        )))
+                        .allowed_mentions(CreateAllowedMentions::new()),
+                )
+                .await?;
         }
 
         eprintln!("Done populating thread for {:?}", emoji);
@@ -219,7 +265,8 @@ impl ReactionCounter {
 
     async fn create_thread(&self, ctx: &Context, emoji: &Option<Emoji>) -> GuildChannel {
         let channel_id = self.config.target_channel_id();
-        let channel = channel_id.to_channel(&ctx.http)
+        let channel = channel_id
+            .to_channel(&ctx.http)
             .await
             .unwrap()
             .guild()
@@ -231,41 +278,31 @@ impl ReactionCounter {
         );
 
         eprintln!("Creating thread for {:?} in {:?}", emoji, channel_id);
-        channel.create_private_thread(&ctx.http, |thread| {
-            thread.name(name);
-            thread.auto_archive_duration(10080);
-            thread.kind(ChannelType::PublicThread)
-        }).await.expect("No permissions to create thread!")
+        channel
+            .create_thread(
+                &ctx.http,
+                CreateThread::new(name)
+                    .auto_archive_duration(AutoArchiveDuration::OneWeek)
+                    .kind(ChannelType::PublicThread),
+            )
+            .await
+            .expect("No permissions to create thread!")
     }
 
     async fn shutdown(&self, ctx: &Context) {
         let data = ctx.data.read().await;
         if let Some(manager) = data.get::<ShardManagerContainer>() {
             eprintln!("Shutting down...");
-            manager.lock().await.shutdown_all().await;
+            manager.shutdown_all().await;
         } else {
             eprintln!("There was a problem getting the shard manager");
         }
     }
 }
 
-
 fn emoji_as_string(emoji: &Emoji) -> &str {
     match emoji {
         Emoji::Custom { name, .. } => name,
         Emoji::Unicode { string } => string,
-    }
-}
-
-fn reaction_for_message(reaction: &ReactionType) -> String {
-    match &reaction {
-        ReactionType::Custom { name, id, animated, .. } => format!(
-            "<{}:{}:{}>",
-            if *animated { "a" } else { "" },
-            name.as_deref().unwrap_or("no_name"),
-            id.0,
-        ),
-        ReactionType::Unicode(string) => string.clone(),
-        _ => "?".to_string(),
     }
 }

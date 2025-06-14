@@ -5,21 +5,23 @@ pub fn parse_iso_week(week_param_opt: Option<&str>) -> Result<IsoWeek, Box<dyn s
     let first_char = week_param.chars().next().ok_or("week parameter empty")?;
     if first_char == '+' || first_char == '-' {
         let week_offset: i64 = week_param.parse()?;
-        let today = Local::today();
+        let today = Local::now();
         let target_day = today + Duration::weeks(week_offset);
         Ok(target_day.iso_week())
     } else {
-        let (year_str, week_str) = week_param.split_once("-").ok_or("bad iso week format (expected `yyyy-ww`)")?;
-        let date_opt = NaiveDate::from_isoywd_opt(year_str.parse()?, week_str.parse()?, Weekday::Mon);
+        let (year_str, week_str) = week_param
+            .split_once("-")
+            .ok_or("bad iso week format (expected `yyyy-ww`)")?;
+        let date_opt =
+            NaiveDate::from_isoywd_opt(year_str.parse()?, week_str.parse()?, Weekday::Mon);
         Ok(date_opt.ok_or("invalid ISO week")?.iso_week())
     }
 }
 
 pub fn iso_week_to_datetime(naive: IsoWeek) -> DateTime<Utc> {
-    let naive_date = NaiveDate::from_isoywd(naive.year(), naive.week(), Weekday::Mon);
-    DateTime::from_utc(naive_date.and_hms(0, 0, 0), Utc)
+    let naive_date = NaiveDate::from_isoywd_opt(naive.year(), naive.week(), Weekday::Mon).unwrap();
+    DateTime::from_naive_utc_and_offset(naive_date.and_hms_opt(0, 0, 0).unwrap(), Utc)
 }
-
 
 /// Discord's epoch starts at "2015-01-01T00:00:00+00:00"
 const DISCORD_EPOCH: u64 = 1_420_070_400_000;
@@ -42,6 +44,6 @@ pub fn time_snowflake(datetime: DateTime<Utc>, high: bool) -> u64 {
 
 /// Extract the timestamp of a snowflake (id).
 pub fn snowflake_time<T: Into<u64>>(id: T) -> DateTime<Utc> {
-    Utc.timestamp_millis(((id.into() >> 22) + DISCORD_EPOCH) as i64)
+    Utc.timestamp_millis_opt(((id.into() >> 22) + DISCORD_EPOCH) as i64)
+        .unwrap()
 }
-
