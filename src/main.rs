@@ -176,7 +176,9 @@ impl ReactionCounter {
                 if (&msg.timestamp as &DateTime<Utc>) > &end_time {
                     break 'outer;
                 }
-                toplist.append(msg).await;
+                if !msg.reactions.is_empty() {
+                    toplist.append(msg).await;
+                }
             }
         }
 
