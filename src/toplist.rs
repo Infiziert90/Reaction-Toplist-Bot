@@ -227,7 +227,7 @@ fn is_same_emoji(r: &MessageReaction, emoji: &Emoji) -> bool {
 
 #[derive(Debug, Clone)]
 pub struct MsgWrap {
-    pub count: u64, // must be first for auto-deriving ordering
+    pub count: u64,
     pub content: String,
     pub message: Message,
 }
