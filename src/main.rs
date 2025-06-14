@@ -144,8 +144,7 @@ impl ReactionCounter {
         );
 
         let start_time = time_utils::iso_week_to_datetime(self.options.calendar_week);
-        // let end_time = start_time + chrono::Duration::weeks(1);
-        let end_time = start_time + chrono::Duration::days(1);
+        let end_time = start_time + chrono::Duration::weeks(1);
         eprintln!("Time span: {:?} til {:?}", start_time, end_time);
 
         let mut toplist = Toplist::new(&self.config, user, ctx.http.clone());
