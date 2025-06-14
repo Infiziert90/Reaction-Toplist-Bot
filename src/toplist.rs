@@ -151,9 +151,12 @@ impl<'c> Toplist<'c> {
 
         let mut min = 0;
         for (i, wrap) in self.other_prep.iter().rev().enumerate() {
+            if i != 0 && i % 100 == 0 {
+                eprintln!("Checking reactions for post {i}");
+            }
             if wrap.count <= min {
                 // Impossible to have more unique users than sum of reactions
-                eprintln!("Early-exiting Other collection after {i} posts");
+                eprintln!("Early-exiting 'Other' collection after {i} posts");
                 break;
             }
             if ids_to_ignore.contains(&wrap.message.id) {
@@ -166,7 +169,7 @@ impl<'c> Toplist<'c> {
             else {
                 continue;
             };
-            eprintln!("Adding post {i} to Other collection (with {count}), new min: {new_min}");
+            eprintln!("Adding post {i} to 'Other' collection (with {count}), new min: {new_min}");
             let new_wrap = MsgWrap {
                 count,
                 ..wrap.clone()
@@ -174,6 +177,10 @@ impl<'c> Toplist<'c> {
             self.other.insert(new_wrap);
             min = new_min;
         }
+        eprintln!(
+            "Collected {} messages for the 'Other' toplist",
+            self.other.len()
+        );
         Ok(())
     }
 
