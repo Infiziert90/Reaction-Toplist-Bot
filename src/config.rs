@@ -1,4 +1,4 @@
-use std::{path::Path, error::Error};
+use std::{error::Error, path::Path};
 
 use serde::Deserialize;
 use serenity::model::id::{ChannelId, EmojiId};
@@ -33,14 +33,12 @@ impl Config {
     }
 }
 
-
 #[derive(Deserialize, Debug)]
 pub struct Toplist {
     #[serde(default = "default_max")]
     pub max: usize,
     pub emoji: Emoji,
 }
-
 
 #[derive(Deserialize, Debug)]
 pub struct Other {
@@ -51,7 +49,6 @@ pub struct Other {
     #[serde(default)]
     pub ignore: Vec<Emoji>,
 }
-
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 #[serde(untagged)]

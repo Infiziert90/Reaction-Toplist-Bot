@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
-use std::collections::{HashMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use linkify::LinkFinder;
 use serenity::futures::future::try_join_all;
 use serenity::http::Http;
-use serenity::model::channel::{Message, ReactionType, MessageReaction};
+use serenity::model::channel::{Message, MessageReaction, ReactionType};
 use serenity::model::prelude::CurrentUser;
 use serenity::prelude::SerenityError;
 
@@ -49,7 +49,8 @@ impl<'c> Toplist<'c> {
             Some(t) => t.url.clone(),
             None => {
                 let links: Vec<_> = self.link_finder.links(&message.content).collect();
-                links.first()
+                links
+                    .first()
                     .map(|s| s.as_str().to_string())
                     .unwrap_or_else(|| message.content.clone())
             }
@@ -58,21 +59,38 @@ impl<'c> Toplist<'c> {
 
     fn append_known(&mut self, message: &Message, content: &str) {
         for entry in self.config.toplist.iter() {
-            let Some(count) = message.reactions.iter()
+            let Some(count) = message
+                .reactions
+                .iter()
                 .find_map(|r| is_same_emoji(r, &entry.emoji).then_some(r.count - r.me as u64))
-                else { continue; };
+            else {
+                continue;
+            };
 
             let list = self.top.entry(entry.emoji.clone()).or_default();
             if Self::prepare_list_for_insert(list, entry.max, count).is_some() {
-                let msg_wrap = MsgWrap { count, message: message.clone(), content: content.to_string() };
+                let msg_wrap = MsgWrap {
+                    count,
+                    message: message.clone(),
+                    content: content.to_string(),
+                };
                 list.insert(msg_wrap);
             }
         }
     }
 
     fn append_other(&mut self, message: &Message, content: &str) {
-        let stripped_reactions: Vec<_> = message.reactions.iter()
-            .filter(|r| !self.config.other.ignore.iter().any(|ignore| is_same_emoji(r, ignore)))
+        let stripped_reactions: Vec<_> = message
+            .reactions
+            .iter()
+            .filter(|r| {
+                !self
+                    .config
+                    .other
+                    .ignore
+                    .iter()
+                    .any(|ignore| is_same_emoji(r, ignore))
+            })
             .cloned()
             .collect();
 
@@ -80,18 +98,29 @@ impl<'c> Toplist<'c> {
         // since it has the number of total reactions
         // where we want the number of distinct users that reacted.
         // It serves to maintain rough ordering of the BTreeSet.
-        let count: u64 = stripped_reactions.iter().map(|r| r.count - r.me as u64).sum();
+        let count: u64 = stripped_reactions
+            .iter()
+            .map(|r| r.count - r.me as u64)
+            .sum();
         if count == 0 {
             return;
         }
 
         let mut message = message.clone();
         message.reactions = stripped_reactions;
-        let msg_wrap = MsgWrap { count, message, content: content.to_string() };
+        let msg_wrap = MsgWrap {
+            count,
+            message,
+            content: content.to_string(),
+        };
         self.other_prep.insert(msg_wrap);
     }
 
-    fn prepare_list_for_insert(list: &mut BTreeSet<MsgWrap>, max: usize, count: u64) -> Option<u64> {
+    fn prepare_list_for_insert(
+        list: &mut BTreeSet<MsgWrap>,
+        max: usize,
+        count: u64,
+    ) -> Option<u64> {
         if count == 0 {
             return None;
         }
@@ -108,7 +137,9 @@ impl<'c> Toplist<'c> {
             return Ok(());
         }
 
-        let ids_to_ignore: HashSet<_> = self.top.values()
+        let ids_to_ignore: HashSet<_> = self
+            .top
+            .values()
             .flat_map(|list| list.iter().map(|wrap| wrap.message.id))
             .collect();
 
@@ -130,10 +161,16 @@ impl<'c> Toplist<'c> {
             }
 
             let count = self.count_distinct_users(&wrap.message).await?;
-            let Some(new_min) = Self::prepare_list_for_insert(&mut self.other, self.config.other.max, count)
-                else { continue; };
+            let Some(new_min) =
+                Self::prepare_list_for_insert(&mut self.other, self.config.other.max, count)
+            else {
+                continue;
+            };
             eprintln!("Adding post {i} to Other collection (with {count}), new min: {new_min}");
-            let new_wrap = MsgWrap { count, ..wrap.clone() };
+            let new_wrap = MsgWrap {
+                count,
+                ..wrap.clone()
+            };
             self.other.insert(new_wrap);
             min = new_min;
         }
@@ -149,16 +186,21 @@ impl<'c> Toplist<'c> {
     }
 
     async fn count_distinct_users(&self, message: &Message) -> Result<u64, SerenityError> {
-        let futures: Vec<_> = message.reactions.iter()
-            .map(|r| message.reaction_users(
-                &self.http,
-                r.reaction_type.clone(),
-                Some(self.config.per_reaction_limit),
-                None
-            ))
+        let futures: Vec<_> = message
+            .reactions
+            .iter()
+            .map(|r| {
+                message.reaction_users(
+                    &self.http,
+                    r.reaction_type.clone(),
+                    Some(self.config.per_reaction_limit),
+                    None,
+                )
+            })
             .collect();
 
-        let mut users: HashSet<_> = try_join_all(futures).await?
+        let mut users: HashSet<_> = try_join_all(futures)
+            .await?
             .iter()
             .flat_map(|users| users.into_iter().map(|user| user.id))
             .collect();
@@ -170,10 +212,8 @@ impl<'c> Toplist<'c> {
 
 fn is_same_emoji(r: &MessageReaction, emoji: &Emoji) -> bool {
     match (&r.reaction_type, emoji) {
-        (ReactionType::Custom { id, ..}, Emoji::Custom { id: id2, .. })
-            if id == id2 => true,
-        (ReactionType::Unicode(s), Emoji::Unicode { string, .. })
-            if s == string => true,
+        (ReactionType::Custom { id, .. }, Emoji::Custom { id: id2, .. }) if id == id2 => true,
+        (ReactionType::Unicode(s), Emoji::Unicode { string, .. }) if s == string => true,
         _ => false,
     }
 }
@@ -201,7 +241,8 @@ impl PartialOrd for MsgWrap {
 
 impl Ord for MsgWrap {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.count.cmp(&other.count)
+        self.count
+            .cmp(&other.count)
             .then_with(|| self.message.id.cmp(&other.message.id))
     }
 }
