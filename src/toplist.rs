@@ -35,8 +35,14 @@ impl<'c> Toplist<'c> {
         }
     }
 
-    pub fn append(&mut self, message: &Message) {
-        let content = self.find_content(message);
+    pub async fn append(&mut self, message: &Message) {
+        let Some(content) = self.find_content(message).await else {
+            return;
+        };
+        if content.is_empty() {
+            eprintln!("no content found for {:#?}", message);
+            return;
+        }
 
         self.append_known(message, &content);
         if self.config.other.enabled {
@@ -44,8 +50,34 @@ impl<'c> Toplist<'c> {
         }
     }
 
-    fn find_content(&self, message: &Message) -> String {
-        match message.attachments.first() {
+    async fn find_content(&self, message: &Message) -> Option<String> {
+        if let Some(reference) = &message.message_reference {
+            // Try to recursively follow forwarded messages.
+            // Realistically, we won't have access to messages from other servers, however.
+            let Some(mid) = reference.message_id else {
+                eprintln!(
+                    "Could not follow forwarded message {} because message_id was missing",
+                    message.id
+                );
+                return None;
+            };
+            let forwarded_message = match self.http.get_message(reference.channel_id, mid).await {
+                Ok(msg) => msg,
+                Err(err) => {
+                    eprintln!(
+                        "Error resolving forwarded message {} {:?}: {}",
+                        message.id, reference, err
+                    );
+                    return None;
+                }
+            };
+            eprintln!(
+                "Resolved forwarded message {} to {}",
+                message.id, forwarded_message.id
+            );
+            return Box::pin(self.find_content(&forwarded_message)).await;
+        }
+        Some(match message.attachments.first() {
             Some(t) => t.url.clone(),
             None => {
                 let links: Vec<_> = self.link_finder.links(&message.content).collect();
@@ -54,7 +86,7 @@ impl<'c> Toplist<'c> {
                     .map(|s| s.as_str().to_string())
                     .unwrap_or_else(|| message.content.clone())
             }
-        }
+        })
     }
 
     fn append_known(&mut self, message: &Message, content: &str) {
