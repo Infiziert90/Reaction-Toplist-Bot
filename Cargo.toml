@@ -6,9 +6,9 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.41"
 itertools = "0.14.0"
-serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-toml = "0.5"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+toml = "0.8.23"
 
 [dependencies.serenity]
 version = "0.12.4"
