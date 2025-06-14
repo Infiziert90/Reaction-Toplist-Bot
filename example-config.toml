@@ -11,6 +11,7 @@ per_reaction_limit = 50 # this is the default
 
 [[toplist]]
 max = 15 # this is the default
+min_reactions = 1 # optional
 # Format for custom emoji.
 emoji.name = "yes"
 emoji.id = 1000377617683333210

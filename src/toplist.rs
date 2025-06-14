@@ -87,6 +87,9 @@ impl<'c> Toplist<'c> {
             else {
                 continue;
             };
+            if entry.min_reactions.is_some_and(|n| count < n) {
+                continue;
+            }
 
             let list = self.top.entry(entry.emoji.clone()).or_default();
             if Self::prepare_list_for_insert(list, entry.max, count).is_some() {
