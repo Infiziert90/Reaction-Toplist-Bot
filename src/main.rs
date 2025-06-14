@@ -30,6 +30,11 @@ mod toplist;
 use config::{Config, Emoji};
 use toplist::{MsgWrap, Toplist};
 
+// https://discord.com/developers/docs/events/gateway#gateway-intents
+const GATEWAY_INTENTS: GatewayIntents = GatewayIntents::GUILDS
+    .union(GatewayIntents::GUILD_MESSAGES)
+    .union(GatewayIntents::GUILD_MESSAGE_TYPING);
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_path(Path::new("./config.toml"))?;
@@ -46,7 +51,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("token missing");
-    let mut client = Client::builder(token, GatewayIntents::GUILD_MESSAGES)
+    let mut client = Client::builder(token, GATEWAY_INTENTS)
         .event_handler(ReactionCounter { config, options })
         .await
         .expect("Error creating client");
