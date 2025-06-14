@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use linkify::LinkFinder;
 use serenity::futures::future::try_join_all;
 use serenity::http::Http;
 use serenity::model::channel::{Message, MessageReaction, ReactionType};
@@ -19,7 +18,6 @@ pub struct Toplist<'c> {
     pub top: HashMap<Emoji, BTreeSet<MsgWrap>>,
     pub other_prep: BTreeSet<MsgWrap>,
     pub other: BTreeSet<MsgWrap>,
-    link_finder: LinkFinder,
 }
 
 impl<'c> Toplist<'c> {
@@ -31,18 +29,14 @@ impl<'c> Toplist<'c> {
             top: Default::default(),
             other_prep: Default::default(),
             other: Default::default(),
-            link_finder: Default::default(),
         }
     }
 
     pub async fn append(&mut self, message: &Message) {
         let Some(content) = self.find_content(message).await else {
+            eprintln!("no content found for {}", message.id);
             return;
         };
-        if content.is_empty() {
-            eprintln!("no content found for {:#?}", message);
-            return;
-        }
 
         self.append_known(message, &content);
         if self.config.other.enabled {
@@ -75,18 +69,13 @@ impl<'c> Toplist<'c> {
                 "Resolved forwarded message {} to {}",
                 message.id, forwarded_message.id
             );
-            return Box::pin(self.find_content(&forwarded_message)).await;
+            Box::pin(self.find_content(&forwarded_message)).await
+        } else {
+            let lines = std::iter::once(message.content.clone())
+                .chain(message.attachments.iter().map(|t| t.url.clone()));
+            Some(itertools::Itertools::intersperse(lines, "\n".to_owned()).collect::<String>())
+                .filter(|s| !s.is_empty())
         }
-        Some(match message.attachments.first() {
-            Some(t) => t.url.clone(),
-            None => {
-                let links: Vec<_> = self.link_finder.links(&message.content).collect();
-                links
-                    .first()
-                    .map(|s| s.as_str().to_string())
-                    .unwrap_or_else(|| message.content.clone())
-            }
-        })
     }
 
     fn append_known(&mut self, message: &Message, content: &str) {
