@@ -1,19 +1,22 @@
 #![feature(slice_concat_trait)]
 
 use chrono::{DateTime, Utc};
+use serenity::all::{
+    AutoArchiveDuration, CreateAllowedMentions, CreateEmbed, CreateMessage, CreateThread,
+    GetMessages,
+};
 use serenity::model::gateway::GatewayIntents;
 use serenity::model::id::GuildId;
 use serenity::model::prelude::CurrentUser;
 use serenity::{
     async_trait,
-    client::bridge::gateway::ShardManager,
-    http::Typing,
+    gateway::ShardManager,
     model::{
         channel::{ChannelType, GuildChannel, ReactionType},
         gateway::Ready,
         id::MessageId,
     },
-    prelude::{Client, Context, EventHandler, Mutex, SerenityError, TypeMapKey},
+    prelude::{Client, Context, EventHandler, SerenityError, TypeMapKey},
 };
 use std::env;
 use std::error::Error;
@@ -71,7 +74,7 @@ struct Options {
 pub struct ShardManagerContainer;
 
 impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<Mutex<ShardManager>>;
+    type Value = Arc<ShardManager>;
 }
 
 struct CurrentUserContainer;
@@ -124,10 +127,7 @@ impl EventHandler for ReactionCounter {
                 .expect("unable to create message");
         }
 
-        typing
-            .map(Typing::stop)
-            .err()
-            .map(|e| eprintln!("wasn't able to (un-)set typing status; {:?}", e));
+        typing.stop();
 
         self.shutdown(&ctx).await;
     }
@@ -156,7 +156,7 @@ impl ReactionCounter {
                 time_utils::snowflake_time(first_id)
             );
             let msgs = channel_id
-                .messages(&ctx.http, |retriever| retriever.after(first_id).limit(100))
+                .messages(&ctx.http, GetMessages::new().after(first_id).limit(100))
                 .await
                 .unwrap();
             eprintln!("Retrieved {} messages", msgs.len());
@@ -207,51 +207,53 @@ impl ReactionCounter {
             .collect();
         for (item, rank) in items_with_rank.into_iter().rev() {
             thread
-                .send_message(&ctx.http, |msg| {
-                    msg.content(format!(
+                .send_message(
+                    &ctx.http,
+                    CreateMessage::new().content(format!(
                         "```c\n{} // {} user{}\n```",
                         rank,
                         item.count,
                         if item.count == 1 { "" } else { "s" },
-                    ))
-                })
+                    )),
+                )
                 .await?;
 
             thread
-                .send_message(&ctx.http, |msg| {
-                    msg.content(format!("{}", &item.content));
-                    msg.allowed_mentions(|am| am.empty_parse())
-                })
+                .send_message(
+                    &ctx.http,
+                    CreateMessage::new()
+                        .content(format!("{}", &item.content))
+                        .allowed_mentions(CreateAllowedMentions::new()),
+                )
                 .await?;
 
+            let reaction_strs: Vec<_> = item
+                .message
+                .reactions
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{} {}",
+                        reaction_for_message(&r.reaction_type),
+                        r.count - r.me as u64
+                    )
+                })
+                .collect();
             thread
-                .send_message(&ctx.http, |msg| {
-                    msg.content(format!(
-                        "by {} ({})",
-                        &item.message.author, &item.message.author.name
-                    ));
-                    msg.add_embed(|embed| {
-                        embed.title("  ");
-                        let reaction_strs: Vec<_> = item
-                            .message
-                            .reactions
-                            .iter()
-                            .map(|r| {
-                                format!(
-                                    "{} {}",
-                                    reaction_for_message(&r.reaction_type),
-                                    r.count - r.me as u64
-                                )
-                            })
-                            .collect();
-                        embed.description(format!(
+                .send_message(
+                    &ctx.http,
+                    CreateMessage::new()
+                        .content(format!(
+                            "by {} ({})",
+                            &item.message.author, &item.message.author.name
+                        ))
+                        .embed(CreateEmbed::new().title("  ").description(format!(
                             "{} | [link]({})",
                             reaction_strs.join(" | "),
                             item.message.link()
-                        ))
-                    });
-                    msg.allowed_mentions(|am| am.empty_parse())
-                })
+                        )))
+                        .allowed_mentions(CreateAllowedMentions::new()),
+                )
                 .await?;
         }
 
@@ -275,11 +277,12 @@ impl ReactionCounter {
 
         eprintln!("Creating thread for {:?} in {:?}", emoji, channel_id);
         channel
-            .create_private_thread(&ctx.http, |thread| {
-                thread.name(name);
-                thread.auto_archive_duration(10080);
-                thread.kind(ChannelType::PublicThread)
-            })
+            .create_thread(
+                &ctx.http,
+                CreateThread::new(name)
+                    .auto_archive_duration(AutoArchiveDuration::OneWeek)
+                    .kind(ChannelType::PublicThread),
+            )
             .await
             .expect("No permissions to create thread!")
     }
@@ -288,7 +291,7 @@ impl ReactionCounter {
         let data = ctx.data.read().await;
         if let Some(manager) = data.get::<ShardManagerContainer>() {
             eprintln!("Shutting down...");
-            manager.lock().await.shutdown_all().await;
+            manager.shutdown_all().await;
         } else {
             eprintln!("There was a problem getting the shard manager");
         }
@@ -310,7 +313,7 @@ fn reaction_for_message(reaction: &ReactionType) -> String {
             "<{}:{}:{}>",
             if *animated { "a" } else { "" },
             name.as_deref().unwrap_or("no_name"),
-            id.0,
+            id.get(),
         ),
         ReactionType::Unicode(string) => string.clone(),
         _ => "?".to_string(),
