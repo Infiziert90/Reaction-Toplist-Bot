@@ -38,6 +38,7 @@ pub struct Toplist {
     #[serde(default = "default_max")]
     pub max: usize,
     pub emoji: Emoji,
+    pub min_reactions: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]
