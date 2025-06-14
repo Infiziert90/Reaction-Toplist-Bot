@@ -94,8 +94,10 @@ struct ReactionCounter {
 impl EventHandler for ReactionCounter {
     async fn ready(&self, ctx: Context, ready: Ready) {
         eprintln!("Connected as {}! Waiting for cache...", ready.user.name);
-        let mut data = ctx.data.write().await;
-        data.insert::<CurrentUserContainer>(ready.user.clone());
+        {
+            let mut data = ctx.data.write().await;
+            data.insert::<CurrentUserContainer>(ready.user.clone());
+        }
     }
 
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
