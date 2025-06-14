@@ -12,7 +12,7 @@ use serenity::{
     async_trait,
     gateway::ShardManager,
     model::{
-        channel::{ChannelType, GuildChannel, ReactionType},
+        channel::{ChannelType, GuildChannel},
         gateway::Ready,
         id::MessageId,
     },
@@ -231,13 +231,7 @@ impl ReactionCounter {
                 .message
                 .reactions
                 .iter()
-                .map(|r| {
-                    format!(
-                        "{} {}",
-                        reaction_for_message(&r.reaction_type),
-                        r.count - r.me as u64
-                    )
-                })
+                .map(|r| format!("{} {}", &r.reaction_type, r.count - r.me as u64))
                 .collect();
             thread
                 .send_message(
@@ -302,20 +296,5 @@ fn emoji_as_string(emoji: &Emoji) -> &str {
     match emoji {
         Emoji::Custom { name, .. } => name,
         Emoji::Unicode { string } => string,
-    }
-}
-
-fn reaction_for_message(reaction: &ReactionType) -> String {
-    match &reaction {
-        ReactionType::Custom {
-            name, id, animated, ..
-        } => format!(
-            "<{}:{}:{}>",
-            if *animated { "a" } else { "" },
-            name.as_deref().unwrap_or("no_name"),
-            id.get(),
-        ),
-        ReactionType::Unicode(string) => string.clone(),
-        _ => "?".to_string(),
     }
 }
