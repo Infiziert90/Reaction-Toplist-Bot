@@ -115,8 +115,6 @@ impl EventHandler for ReactionCounter {
 
         let toplist = self.scan_channel(&ctx, &user).await;
 
-        // println!("{:#?}", &toplist.top);
-
         let typing = self.config.target_channel_id().start_typing(&ctx.http);
 
         let emoji_to_post: Vec<_> = self.config.toplist.iter().map(|item| &item.emoji).collect();
@@ -167,6 +165,7 @@ impl ReactionCounter {
                 .unwrap();
             eprintln!("Retrieved {} messages", msgs.len());
 
+            // Messages are returned newest to oldest
             first_id = match msgs.first() {
                 Some(first) => first.id.into(),
                 None => break,
@@ -213,6 +212,7 @@ impl ReactionCounter {
                 Some((item, *rank))
             })
             .collect();
+
         for (item, rank) in items_with_rank.into_iter().rev() {
             thread
                 .send_message(
