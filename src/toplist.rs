@@ -126,6 +126,7 @@ impl<'c> Toplist<'c> {
             .iter()
             .map(|r| r.count - r.me as u64)
             .sum();
+
         if count == 0 {
             return;
         }
@@ -173,10 +174,11 @@ impl<'c> Toplist<'c> {
             ids_to_ignore.len(),
         );
 
-        let mut min = 0;
+        // Track the minimum number of unique users as an optimization.
+        let mut min = 1;
         for (i, wrap) in self.other_prep.iter().rev().enumerate() {
-            if wrap.count <= min {
-                // Impossible to have more unique users than sum of reactions
+            if wrap.count < min {
+                // Impossible to have more unique users than sum of reactions.
                 eprintln!("Early-exiting 'Other' collection after {i} posts");
                 break;
             }
@@ -184,15 +186,18 @@ impl<'c> Toplist<'c> {
                 continue;
             }
 
-            let count = self.count_distinct_users(&wrap.message).await?;
+            let user_count = self.count_distinct_users(&wrap.message).await?;
+            if user_count < self.config.other.min_reactions.unwrap_or(1) {
+                continue;
+            }
             let Some(new_min) =
-                Self::prepare_list_for_insert(&mut self.other, self.config.other.max, count)
+                Self::prepare_list_for_insert(&mut self.other, self.config.other.max, user_count)
             else {
                 continue;
             };
-            eprintln!("Adding post {i} to 'Other' collection (with {count}), new min: {new_min}");
+            eprintln!("Adding post {i} to 'Other' collection (with {user_count}), new min: {new_min}");
             let new_wrap = MsgWrap {
-                count,
+                count: user_count,
                 ..wrap.clone()
             };
             self.other.insert(new_wrap);
