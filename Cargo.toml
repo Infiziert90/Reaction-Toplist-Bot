@@ -11,7 +11,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 toml = "0.8.23"
 
 [dependencies.serenity]
-version = "0.12.4"
+git = 'https://github.com/serenity-rs/serenity.git'
+# Requires something higher than 0.12.4 or f28ac460afdbf0ab68f0679de4e11d6615879135
+# for forwarded messages support.
+# This is the latest ref as of 2025-09-04.
+rev = 'd11970fa33c2e1f891a0431c26f30aea48dd787d'
 default-features = false
 features = [
     "builder",
