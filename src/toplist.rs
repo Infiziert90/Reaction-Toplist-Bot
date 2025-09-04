@@ -33,7 +33,7 @@ impl<'c> Toplist<'c> {
     }
 
     pub async fn append(&mut self, message: &Message) {
-        let Some(content) = self.find_content(message).await else {
+        let Some(content) = self.resolve_content(message) else {
             eprintln!("no content found for {}", message.id);
             return;
         };
@@ -44,38 +44,18 @@ impl<'c> Toplist<'c> {
         }
     }
 
-    async fn find_content(&self, message: &Message) -> Option<String> {
-        if let Some(reference) = &message.message_reference {
-            // Try to recursively follow forwarded messages.
-            // Realistically, we won't have access to messages from other servers, however.
-            let Some(mid) = reference.message_id else {
-                eprintln!(
-                    "Could not follow forwarded message {} because message_id was missing",
-                    message.id
-                );
-                return None;
-            };
-            let forwarded_message = match self.http.get_message(reference.channel_id, mid).await {
-                Ok(msg) => msg,
-                Err(err) => {
-                    eprintln!(
-                        "Error resolving forwarded message {} {:?}: {}",
-                        message.id, reference, err
-                    );
-                    return None;
-                }
-            };
-            eprintln!(
-                "Resolved forwarded message {} to {}",
-                message.id, forwarded_message.id
-            );
-            Box::pin(self.find_content(&forwarded_message)).await
+    fn resolve_content(&self, message: &Message) -> Option<String> {
+        let (content, attachments) =
+        if let Some(forwarded_message) = message.message_snapshots.first() {
+            eprintln!("Message {} was forwarded (from a message of kind {:?})", message.id, forwarded_message.kind);
+            (&forwarded_message.content, &forwarded_message.attachments)
         } else {
-            let lines = std::iter::once(message.content.clone())
-                .chain(message.attachments.iter().map(|t| t.url.clone()));
-            Some(itertools::Itertools::intersperse(lines, "\n".to_owned()).collect::<String>())
-                .filter(|s| !s.is_empty())
-        }
+            (&message.content, &message.attachments)
+        };
+        let lines = std::iter::once(content.clone())
+            .chain(attachments.iter().map(|t| t.url.clone()));
+        Some(itertools::Itertools::intersperse(lines, "\n".to_owned()).collect::<String>())
+            .filter(|s| !s.is_empty())
     }
 
     fn append_known(&mut self, message: &Message, content: &str) {
