@@ -49,6 +49,7 @@ pub struct Other {
     pub max: usize,
     #[serde(default)]
     pub ignore: Vec<Emoji>,
+    pub min_reactions: Option<u64>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
